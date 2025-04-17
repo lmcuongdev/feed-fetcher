@@ -199,7 +199,7 @@ async def root():
     return {"message": "Welcome to FastAPI"}
 
 
-@app.post("/api")
+@app.post("/api/fetch")
 async def receive_payload(request: Request):
     raw_payload = await request.body()
     raw_payload_string = raw_payload.decode()
