@@ -62,19 +62,17 @@ class FacebookScraper:
             page_id = response.json()["page_id"]
             redis_client.set(cache_key, page_id)
             return page_id
-    
-    async def _get_posts_by_page_id(
-        self, page_id: str
-    ) -> List[Dict[str, Any]]:
+
+    async def _get_posts_by_page_id(self, page_id: str) -> List[Dict[str, Any]]:
         """Fetch posts from a Facebook page"""
-        
+
         cache_key = f"fb_posts:{page_id}"
         cached_posts = redis_client.get(cache_key)
         if cached_posts:
             print(f"Cache hit for Facebook posts from {page_id}")
             return json.loads(cached_posts)
         print(f"Cache MISS for Facebook posts from page ID {page_id}")
-        
+
         selected_api_key = random.choice(self.api_keys)
         url = f"https://facebook-scraper3.p.rapidapi.com/page/posts"
         headers = {
@@ -87,7 +85,7 @@ class FacebookScraper:
             response = await client.get(url, headers=headers, params=params)
             response.raise_for_status()
 
-            res = response.json()['results']
+            res = response.json()["results"]
             redis_client.setex(cache_key, CACHE_TTL, json.dumps(res))
             return res
 
@@ -100,20 +98,25 @@ class FacebookScraper:
             page_id = await self.get_page_id(page_url)
             # By default this returns 3 posts
             posts = await self._get_posts_by_page_id(page_id)
-            
+
             results = []
             for post in posts[:post_count]:
                 media = []
-                if post.get('image'):
-                    media.append(post['image'].get('uri'))
-                if post.get('video_files'):
-                    media.append(post['video_files'].get('video_hd_file'))
-                if post.get('album_preview'):
-                    media.extend([image_obj['image_file_uri'] for image_obj in post['album_preview']])
+                if post.get("image"):
+                    media.append(post["image"].get("uri"))
+                if post.get("video_files"):
+                    media.append(post["video_files"].get("video_hd_file"))
+                if post.get("album_preview"):
+                    media.extend(
+                        [
+                            image_obj["image_file_uri"]
+                            for image_obj in post["album_preview"]
+                        ]
+                    )
                 obj = {
-                    'url': post.get('url', ''),
-                    'content': post.get('message', ''),
-                    'media': media
+                    "url": post.get("url", ""),
+                    "content": post.get("message", ""),
+                    "media": media,
                 }
                 results.append(obj)
             return {"url": page_url, "posts": results}
