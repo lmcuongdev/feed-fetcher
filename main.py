@@ -16,7 +16,7 @@ app = FastAPI(title="FastAPI App", description="A FastAPI application", version=
 
 # Configure Redis
 redis_client = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
-CACHE_TTL = 300  # 5 minutes in seconds
+CACHE_TTL = 60 * 60  # 1 day in seconds
 
 # Configure CORS
 app.add_middleware(
