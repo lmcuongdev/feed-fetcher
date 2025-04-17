@@ -63,6 +63,44 @@ class FacebookScraper:
             redis_client.set(cache_key, page_id)
             return page_id
 
+    async def get_group_id(self, group_url: str) -> str:
+        """Get Facebook group ID from group URL"""
+        
+        try:
+            group_id = group_url.split("/groups/")[1].split("/")[0].split("?")[0]
+            if group_id.isdigit():
+                print(f"Found group ID {group_id} directly in URL")
+                return group_id
+        except Exception:
+            pass  # Continue with API call if URL parsing fails
+
+        # Check cache first
+        cache_key = f"fb_group_id:{group_url}"
+        cached_id = redis_client.get(cache_key)
+        if cached_id:
+            print(f"Cache hit for Facebook group {group_url} with id {cached_id}")
+            return cached_id
+        print(f"Cache MISS for Facebook group {group_url}")
+
+        selected_api_key = random.choice(self.api_keys)
+
+        # Call Facebook API to get group ID
+        url = f"https://facebook-scraper3.p.rapidapi.com/group/id"
+        headers = {
+            "x-rapidapi-host": "facebook-scraper3.p.rapidapi.com",
+            "x-rapidapi-key": selected_api_key,
+        }
+        params = {"url": group_url}
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, params=params)
+            response.raise_for_status()
+
+            # Return the group ID from response
+            group_id = response.json()["group_id"]
+            redis_client.set(cache_key, group_id)
+            return group_id
+
     async def _get_posts_by_page_id(self, page_id: str) -> List[Dict[str, Any]]:
         """Fetch posts from a Facebook page"""
 
@@ -89,9 +127,52 @@ class FacebookScraper:
             redis_client.setex(cache_key, CACHE_TTL, json.dumps(res))
             return res
 
+    async def _get_posts_by_group_id(self, group_id: str) -> List[Dict[str, Any]]:
+        """Fetch posts from a Facebook group"""
+
+        cache_key = f"fb_group_posts:{group_id}"
+        cached_posts = redis_client.get(cache_key)
+        if cached_posts:
+            print(f"Cache hit for Facebook group posts from {group_id}")
+            return json.loads(cached_posts)
+        print(f"Cache MISS for Facebook group posts from group ID {group_id}")
+
+        selected_api_key = random.choice(self.api_keys)
+        url = f"https://facebook-scraper3.p.rapidapi.com/group/posts"
+        headers = {
+            "x-rapidapi-host": "facebook-scraper3.p.rapidapi.com",
+            "x-rapidapi-key": selected_api_key,
+        }
+        params = {"group_id": group_id, "sorting_order": "CHRONOLOGICAL"}
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, params=params)
+            response.raise_for_status()
+
+            res = response.json()["posts"]
+            redis_client.setex(cache_key, CACHE_TTL, json.dumps(res))
+            return res
+
+    def _format_post(self, post: Dict[str, Any], post_count: int = 3) -> Dict[str, Any]:
+        """Format a Facebook post (either from page or group)"""
+        media = []
+        if post.get("image"):
+            media.append(post["image"].get("uri"))
+        if post.get("video_files"):
+            media.append(post["video_files"].get("video_hd_file"))
+        if post.get("album_preview"):
+            media.extend(
+                [image_obj["image_file_uri"] for image_obj in post["album_preview"]]
+            )
+        return {
+            "url": post.get("url", ""),
+            "content": post.get("message", ""),
+            "media": media,
+        }
+
     async def get_page_posts(
         self, page_url: str, post_count: int = 3
-    ) -> List[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Fetch posts from a Facebook page"""
 
         try:
@@ -101,28 +182,29 @@ class FacebookScraper:
 
             results = []
             for post in posts[:post_count]:
-                media = []
-                if post.get("image"):
-                    media.append(post["image"].get("uri"))
-                if post.get("video_files"):
-                    media.append(post["video_files"].get("video_hd_file"))
-                if post.get("album_preview"):
-                    media.extend(
-                        [
-                            image_obj["image_file_uri"]
-                            for image_obj in post["album_preview"]
-                        ]
-                    )
-                obj = {
-                    "url": post.get("url", ""),
-                    "content": post.get("message", ""),
-                    "media": media,
-                }
-                results.append(obj)
+                results.append(self._format_post(post))
             return {"url": page_url, "posts": results}
         except Exception as e:
             print(f"Error scraping Facebook page {page_url}: {str(e)}")
             return {"url": page_url, "posts": []}
+
+    async def get_group_posts(
+        self, group_url: str, post_count: int = 3
+    ) -> Dict[str, Any]:
+        """Fetch posts from a Facebook group"""
+
+        try:
+            group_id = await self.get_group_id(group_url)
+            # By default this returns 3 posts
+            posts = await self._get_posts_by_group_id(group_id)
+
+            results = []
+            for post in posts[:post_count]:
+                results.append(self._format_post(post))
+            return {"url": group_url, "posts": results}
+        except Exception as e:
+            print(f"Error scraping Facebook group {group_url}: {type(e)} {str(e)}")
+            return {"url": group_url, "posts": []}
 
 
 class TwitterScraper:
@@ -217,13 +299,14 @@ async def receive_payload(request: Request):
             username = url.split("/")[-1]
             result = await twitter_scraper.get_user_posts(username)
             results.append(result)
-
+        elif url.startswith("https://www.facebook.com/groups/"):
+            # Handle Facebook group URLs
+            result = await facebook_scraper.get_group_posts(url)
+            results.append(result)
         elif url.startswith("https://www.facebook.com/"):
-            # Extract page name from Facebook URL
-            # page_name = url.split("/")[-1]
+            # Handle Facebook page URLs
             result = await facebook_scraper.get_page_posts(url)
             results.append(result)
-
         else:
             print(f"Invalid URL: {url}")
             # raise ValueError(f"Invalid URL: {url}")
