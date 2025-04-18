@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 import httpx
 import redis
 from facebook_page_scraper import Facebook_scraper
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from twikit import Client as TwitterClient
@@ -290,6 +290,9 @@ async def receive_payload(request: Request):
     raw_payload_string = raw_payload.decode()
     urls = raw_payload_string.strip().split("\n")
     urls = [url.strip() for url in urls if url.strip()]
+
+    if len(urls) > 3:
+        raise HTTPException(status_code=400, detail="Hãy lựa chọn tối đa 3 URL")
 
     results = []
 
